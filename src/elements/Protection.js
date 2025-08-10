@@ -1,8 +1,12 @@
-// Capa responsable de generar las superficies de protección siguiendo
-// el método de la esfera rodante (IEC 62305‑2).  A partir de los
-// pararrayos definidos en `Objects.js` calcula la envolvente que una
-// esfera imaginaria de radio `sphere.radius` puede tocar sin
-// interceptar la estructura protegida.
+// Este módulo construye visualmente el volumen protegido aplicando el
+// **método de la esfera rodante**. La idea básica es imaginar una
+// esfera que se apoya en los pararrayos y "rueda" alrededor de la
+// estructura. Cualquier zona que pueda ser tocada por la esfera se
+// considera expuesta al rayo; por tanto el volumen protegido es el
+// espacio que queda por debajo de la esfera. A partir de los pararrayos
+// definidos en `Objects.js` se calcula la envolvente que una esfera
+// imaginaria de radio `sphere.radius` puede tocar sin interceptar la
+// estructura protegida.
 
 import { objects, sphere } from './Objects'
 import { scene } from '../index'
@@ -48,23 +52,28 @@ export function protection () {
   protections = []
 
   // La "granulación" define cuántos puntos se emplean para aproximar
-  // las curvas de intersección de la esfera con los pararrayos.
+  // cada curva. A mayor número, más suave será la superficie pero más
+  // costoso será el cálculo.
   let granulation = 20
 
-  // Consideramos únicamente los objetos marcados como pararrayos.
+  // Filtramos únicamente los objetos que actúan como pararrayos.
   let rods = objects.filter(o => o.isRod)
-  // Recorremos todas las combinaciones de pares de pararrayos.
+  // Recorremos todas las combinaciones posibles de dos pararrayos. Para
+  // cada pareja se comprobará si una esfera puede apoyarse en ambos a la
+  // vez.
   for (let mainIdx = 0; mainIdx < (rods.length - 1); mainIdx++) {
     let co = rods[mainIdx]
     for (let secIdx = (mainIdx + 1); secIdx < rods.length; secIdx++) {
       let o = rods[secIdx]
-      // Si la esfera de radio `sphere.radius` puede tocar ambos
-      // pararrayos simultáneamente (profundidad de penetración > 0)
-      // calculamos la curva protectora entre ellos.
+      // Verificamos si la esfera de radio `sphere.radius` puede tocar
+      // ambos pararrayos simultáneamente. Si la distancia es demasiado
+      // grande `penetrationDepth` devuelve `null` y se ignora el par. En
+      // caso contrario, se calcula la curva protectora entre ellos.
       let depth = penetrationDepth(sphere.radius, distance(co, o))
       if (depth) {
 
-        // Punto superior de protección de cada pararrayos.
+        // Punto superior de protección de cada pararrayos (punta del
+        // mástil más la altura normativa).
         let p1 = co.getProtectivePoint()
         let p2 = o.getProtectivePoint()
         // Punto medio entre ambos pararrayos.
@@ -76,21 +85,25 @@ export function protection () {
         m.y = m.y - penetration
         let p3 = new Vector3(m.x, m.y, m.z)
         p3.y = p3.y - penetration
-        // Aproximamos la curva parabólica que recorre la esfera entre
-        // los dos puntos de protección.
+        // Con estos tres puntos (inicio, vértice y final) generamos una
+        // curva parabólica que describe el recorrido del centro de la
+        // esfera al moverse de un pararrayos al otro.
         let points = new QuadraticBezierCurve3(p1, p3, p2).getPoints(
           granulation)
 
         // En cada punto de la curva generamos un "cono" protector que
-        // representa la superficie tangente de la esfera rodante.
+        // representa la superficie tangente de la esfera rodante. El
+        // conjunto de todos esos conos da una idea intuitiva de cómo la
+        // esfera cubre la zona.
         points.forEach(p => {
           let cone = ProtectiveCone.getMeshFor(p, sphere.radius, 4,
             yellowTransparentMaterial)
           protections.push(cone)
 
         })
-        // También almacenamos la línea de puntos para, más adelante,
-        // formar superficies entre diferentes curvas.
+        // También almacenamos la línea de puntos. Más adelante se
+        // compararán estas líneas para detectar triángulos y poder
+        // cerrar superficies entre distintas curvas.
         let geometry = new Geometry()
         geometry.vertices = points
         let line = new Line(geometry, redMaterial)
@@ -101,11 +114,15 @@ export function protection () {
     }
 
   }
+  // Una vez calculadas las líneas, buscamos grupos de tres que formen un
+  // triángulo. Cada triángulo indica que la esfera puede apoyarse en los
+  // tres pararrayos correspondientes y por tanto existe una superficie
+  // cerrada entre ellos.
   let triangles = []
   for (let fi = 0; fi < lines.length; fi++) {
     let l1 = lines[fi]
     l1.neighbors = []
-    // znajdz sąsiadów
+    // "Buscar vecinos": líneas que comparten algún extremo con l1.
     for (let i = 0; i < lines.length; i++) {
       if (fi !== i) {
         let l2 = lines[i]
@@ -115,7 +132,9 @@ export function protection () {
         }
       }
     }
-    // wyszukaj trojkaty
+    // "Buscar triángulos": comprobamos si alguno de los vecinos se une a
+    // un tercer vecino que a su vez vuelve a l1, formando así un lazo de
+    // tres líneas.
     l1.neighbors.forEach(n1 => {
       if (n1.neighbors) {
         n1.neighbors.forEach(n2 => {
@@ -124,6 +143,9 @@ export function protection () {
               if (n3 === l1) {
                 let isT = isTriangle(n1, n2, n3)
                 if (isT) {
+                  // Ordenamos los identificadores para poder detectar
+                  // triángulos repetidos independientemente del orden en
+                  // el que se encuentren.
                   let tri = [n1, n2, n3].sort((a, b) => {
                     let x = a.uuid
                     let y = b.uuid
@@ -156,8 +178,8 @@ export function protection () {
   })
 }
 
-// A partir de tres líneas curvas (que unen pares de pararrayos)
-// construye las superficies que las cierran para formar un "paraguas"
+// A partir de tres líneas curvas (que unen pares de pararrayos) se
+// construyen superficies que las cierran para formar un "paraguas"
 // protector.
 function drawFaces (triangle, granulation) {
 
@@ -178,8 +200,9 @@ function drawFaces (triangle, granulation) {
 
 }
 
-// Dibuja superficies cuadriláteras entre dos curvas hasta la mitad de
-// su longitud para ir cerrando la envolvente protectora.
+// Dibuja superficies cuadriláteras entre dos curvas hasta la mitad de su
+// longitud. Repetido para cada par de líneas de un triángulo, va
+// cerrando progresivamente la envolvente protectora.
 function drawToHalfOfLine (l1, l2, granulation) {
 
   let l1p = l1.geometry.vertices.slice()
@@ -286,18 +309,22 @@ function drawTriangle (p0, p1, p2) {
   return new Mesh(triangle, yellowTransparentMaterial)
 }
 
+// Comprueba si dos líneas comparten el mismo punto de inicio.
 function sameStart (l1, l2) {
   return l1.start.equals(l2.start)
 }
 
+// Comprueba si el inicio de una línea coincide con el final de otra.
 function startEqualEnd (l1, l2) {
   return l1.start.equals(l2.end)
 }
 
+// Comprueba si dos líneas terminan en el mismo punto.
 function sameEnd (l1, l2) {
   return l1.end.equals(l2.end)
 }
 
+// A partir de tres líneas devuelve el triángulo geométrico que forman.
 function toTriangle (lines) {
 
   let vertices = []
@@ -317,6 +344,7 @@ function toTriangle (lines) {
   return new Triangle(unique[0], unique[1], unique[2])
 }
 
+// Determina si tres líneas conectadas forman un triángulo cerrado.
 function isTriangle (l1, l2, l3) {
   if (sameStart(l1, l2)) {
     if (sameEnd(l1, l3) && startEqualEnd(l3, l2)) {
@@ -351,6 +379,8 @@ function isTriangle (l1, l2, l3) {
 }
 
 function createPointVisual (v) {
+  // Utilidad de depuración: dibuja una pequeña esfera roja en `v` para
+  // poder inspeccionar visualmente puntos clave del algoritmo.
   let sg = new SphereGeometry(0.05, 10, 10)
   let s = new Mesh(sg, redMaterial)
   s.position.x = v.x
