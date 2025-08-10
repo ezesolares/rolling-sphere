@@ -1,12 +1,17 @@
 import { Vector2, Vector3 } from 'three'
 
 module.exports = {
+  // Obtiene la longitud de la base de un triángulo rectángulo cuyos
+  // catetos representan la distancia horizontal entre el punto de
+  // contacto de la esfera y el suelo.
   basisOfRightTriangleBasedOnSphereOnGroundPoint (
     radiusOfSphere, heightOfRightTriangle) {
     let rMinusH = radiusOfSphere - heightOfRightTriangle
     return Math.sqrt((radiusOfSphere * radiusOfSphere) - (rMinusH * rMinusH))
   },
 
+  // Calcula los puntos del perfil generado por una esfera de radio
+  // `radiusOfSphere` tangente al suelo a una altura `maxHeight`.
   calculateContactPoints (maxHeight, radiusOfSphere, segments) {
     let points = [new Vector2(0, maxHeight)]
     let heightDelta = maxHeight / segments
@@ -21,6 +26,7 @@ module.exports = {
     points.push(new Vector2(maxBase, 0))
     return points
   },
+  // Utilidades geométricas complementarias.
   nearestNeighbours (object, objects, numberOfNeighbours) {
     let position = object.position
     let distances = []
@@ -42,9 +48,14 @@ module.exports = {
     })
     return neighbours
   },
+  // Distancia euclídea entre dos objetos Three.js.
   distance (object1, object2) {
     return object1.position.distanceTo(object2.position)
   },
+  // Profundidad de penetración de una esfera de radio `radiusOfSphere`
+  // apoyada simultáneamente en dos puntos separados `distanceBetween`.
+  // Si la distancia es mayor que el diámetro de la esfera no existe
+  // intersección y se devuelve `null`.
   penetrationDepth (radiusOfSphere, distanceBetween) {
     if (radiusOfSphere * 2 < distanceBetween) {
       return null
@@ -68,6 +79,7 @@ module.exports = {
       (2 * radiusOfSphere - heightOfSphericalSector) * heightOfSphericalSector)
   },
 
+  // Punto medio entre dos `Vector3`.
   midpointVector3 (vertex1, vertex2) {
     return new Vector3(((vertex1.x + vertex2.x) / 2),
       ((vertex1.y + vertex2.y) / 2), ((vertex1.z + vertex2.z) / 2))

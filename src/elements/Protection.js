@@ -1,3 +1,9 @@
+// Capa responsable de generar las superficies de protección siguiendo
+// el método de la esfera rodante (IEC 62305‑2).  A partir de los
+// pararrayos definidos en `Objects.js` calcula la envolvente que una
+// esfera imaginaria de radio `sphere.radius` puede tocar sin
+// interceptar la estructura protegida.
+
 import { objects, sphere } from './Objects'
 import { scene } from '../index'
 import { redMaterial, yellowTransparentMaterial } from './Materials'
@@ -19,6 +25,8 @@ let lines = []
 let helpPoints = []
 
 export function calculateProtection () {
+  // Punto de entrada público.  Limpia cualquier geometría previa y
+  // recalcula las zonas protegidas.
   clearProtection()
   protection()
 }
@@ -30,7 +38,8 @@ export function clearProtection () {
 }
 
 export function protection () {
-
+  // Inicialización: eliminar cualquier superficie existente y
+  // preparar estructuras temporales.
   if (protections && protections.length) {
     protections.forEach(p => scene.remove(p))
   }
@@ -38,38 +47,50 @@ export function protection () {
   helpPoints = []
   protections = []
 
+  // La "granulación" define cuántos puntos se emplean para aproximar
+  // las curvas de intersección de la esfera con los pararrayos.
   let granulation = 20
 
+  // Consideramos únicamente los objetos marcados como pararrayos.
   let rods = objects.filter(o => o.isRod)
+  // Recorremos todas las combinaciones de pares de pararrayos.
   for (let mainIdx = 0; mainIdx < (rods.length - 1); mainIdx++) {
     let co = rods[mainIdx]
     for (let secIdx = (mainIdx + 1); secIdx < rods.length; secIdx++) {
       let o = rods[secIdx]
+      // Si la esfera de radio `sphere.radius` puede tocar ambos
+      // pararrayos simultáneamente (profundidad de penetración > 0)
+      // calculamos la curva protectora entre ellos.
       let depth = penetrationDepth(sphere.radius, distance(co, o))
       if (depth) {
 
+        // Punto superior de protección de cada pararrayos.
         let p1 = co.getProtectivePoint()
         let p2 = o.getProtectivePoint()
+        // Punto medio entre ambos pararrayos.
         let m = midpointVector3(p1, p2)
         let distance = p1.distanceTo(p2)
+        // Desplazamos el punto medio hacia abajo según la penetración
+        // de la esfera para obtener el vértice de la parábola.
         let penetration = penetrationDepth(sphere.radius, distance)
         m.y = m.y - penetration
         let p3 = new Vector3(m.x, m.y, m.z)
         p3.y = p3.y - penetration
+        // Aproximamos la curva parabólica que recorre la esfera entre
+        // los dos puntos de protección.
         let points = new QuadraticBezierCurve3(p1, p3, p2).getPoints(
           granulation)
 
-        // protections.push(ProtectiveCone.getMeshFor(p1, sphere.radius, 9, yellowTransparentMaterial));
-        // protections.push(ProtectiveCone.getMeshFor(p2, sphere.radius, 9, yellowTransparentMaterial));
-
+        // En cada punto de la curva generamos un "cono" protector que
+        // representa la superficie tangente de la esfera rodante.
         points.forEach(p => {
-          // createPointVisual(p);
-
           let cone = ProtectiveCone.getMeshFor(p, sphere.radius, 4,
             yellowTransparentMaterial)
           protections.push(cone)
 
         })
+        // También almacenamos la línea de puntos para, más adelante,
+        // formar superficies entre diferentes curvas.
         let geometry = new Geometry()
         geometry.vertices = points
         let line = new Line(geometry, redMaterial)
@@ -135,6 +156,9 @@ export function protection () {
   })
 }
 
+// A partir de tres líneas curvas (que unen pares de pararrayos)
+// construye las superficies que las cierran para formar un "paraguas"
+// protector.
 function drawFaces (triangle, granulation) {
 
   let l1 = triangle[0]
@@ -144,6 +168,8 @@ function drawFaces (triangle, granulation) {
   drawToHalfOfLine(l1, l3, granulation)
   drawToHalfOfLine(l3, l2, granulation)
 
+  // Finalmente cerramos el centro del triángulo con una superficie
+  // triangular calculada a partir de los puntos medios de cada línea.
   let middleId = granulation / 2
   let tri = drawTriangleLike(l1.geometry.vertices[middleId],
     l2.geometry.vertices[middleId], l3.geometry.vertices[middleId],
@@ -152,11 +178,14 @@ function drawFaces (triangle, granulation) {
 
 }
 
+// Dibuja superficies cuadriláteras entre dos curvas hasta la mitad de
+// su longitud para ir cerrando la envolvente protectora.
 function drawToHalfOfLine (l1, l2, granulation) {
 
   let l1p = l1.geometry.vertices.slice()
   let l2p = l2.geometry.vertices.slice()
   if (sameStart(l1, l2)) {
+    // ambas líneas tienen el mismo origen
   } else if (sameEnd(l1, l2)) {
     l1p.reverse()
     l2p.reverse()
@@ -171,13 +200,18 @@ function drawToHalfOfLine (l1, l2, granulation) {
     protections.push(
       drawSquareLike(l1p[ii], l1p[ii + 1], l2p[ii + 1], l2p[ii]))
   }
+  // Cerramos el vértice más cercano a los pararrayos con un triángulo
   let corner = drawTriangle(l1p[0], l1p[1], l2p[1])
   protections.push(corner)
 }
 
+// Construye un cuadrilátero curvado interpolando los puntos medios y
+// desplazándolos hacia abajo según la penetración de la esfera.
 function drawSquareLike (p0, p1, p2, p3) {
   let square = new Geometry()
 
+  // Cálculo de los puntos medios entre los vértices opuestos del
+  // cuadrilátero y ajuste vertical por la profundidad de penetración.
   let p0p3 = midpointVector3(p0, p3)
   let distance1 = p0.distanceTo(p3)
   let penetration1 = penetrationDepth(sphere.radius, distance1)
@@ -206,6 +240,8 @@ function drawSquareLike (p0, p1, p2, p3) {
 
 }
 
+// Similar a `drawSquareLike` pero creando una superficie triangular
+// curvada que se utiliza para cerrar el centro entre tres curvas.
 function drawTriangleLike (p0, p1, p2) {
   let triangle = new Geometry()
 
